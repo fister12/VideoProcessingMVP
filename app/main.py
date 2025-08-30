@@ -13,6 +13,10 @@ class EditRequest(BaseModel):
     edit_type: str
     params: dict
 
+class TimelineRequest(BaseModel):
+    clips: list
+    output_filename: str
+
 app = FastAPI(title="Video Processing API")
 
 # Add CORS middleware for frontend communication
@@ -63,6 +67,40 @@ async def submit_edit_job(request: EditRequest):
     output_path = os.path.join(PROXIES_DIR, f"edit_{request.filename}")
     task = process_edit.delay(original_path, output_path, request.edit_type, request.params)
     return {"message": "Edit job started.", "task_id": task.id}
+
+@app.post("/process-timeline/", status_code=202, tags=["Edit"])
+async def process_timeline(request: TimelineRequest):
+    """Process a timeline with multiple clips into a single video."""
+    if not request.clips:
+        raise HTTPException(status_code=400, detail="No clips provided")
+    
+    # Prepare segments for concatenation
+    segments = []
+    for clip in request.clips:
+        original_path = os.path.join(ORIGINALS_DIR, clip['videoName'])
+        # Create temporary cut files for each segment
+        temp_cut_path = os.path.join(PROXIES_DIR, f"temp_cut_{clip['id']}_{clip['videoName']}")
+        
+        # First, cut each segment
+        cut_task = process_edit.delay(
+            original_path, 
+            temp_cut_path, 
+            'cut', 
+            {'start': clip['startTime'], 'end': clip['endTime']}
+        )
+        
+        segments.append({'path': temp_cut_path})
+    
+    # Then concatenate all segments
+    output_path = os.path.join(PROXIES_DIR, request.output_filename)
+    concat_task = process_edit.delay(
+        "", # Not used for concat
+        output_path,
+        'concat',
+        {'segments': segments}
+    )
+    
+    return {"message": "Timeline processing started.", "task_id": concat_task.id}
 
 @app.post("/upload-video/", status_code=202, tags=["Video"])
 async def upload_video(file: UploadFile = File(...)):
