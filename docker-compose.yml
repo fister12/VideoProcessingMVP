@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  redis:
+    image: "redis:7-alpine"
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    working_dir: /app/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./uploads:/app/uploads
+
+  worker:
+    build: .
+    working_dir: /app
+    command: celery -A workers.tasks:celery_app worker --loglevel=info
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "3000:3000"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
